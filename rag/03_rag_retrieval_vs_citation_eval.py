@@ -23,6 +23,7 @@ class DocChunk:
     chunk_id: str
     text: str
     forbidden_phrases: tuple[str, ...] = ()
+    reviewed_answers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,15 +40,19 @@ CORPUS: dict[str, DocChunk] = {
     "REG-101": DocChunk(
         chunk_id="REG-101",
         text="Пункт 4.2. Возврат предоплаты оформляется по письменному заявлению клиента в течение 10 рабочих дней.",
+        forbidden_phrases=("заявление не требуется", "без письменного заявления"),
+        reviewed_answers=("Возврат оформляется по письменному заявлению в течение 10 рабочих дней.",),
     ),
     "REG-204": DocChunk(
         chunk_id="REG-204",
         text="Пункт 7.1. Перенос слота допускается только при задержке строго более чем на 15 минут. При задержке до 15 минут включительно слот сохраняется.",
         forbidden_phrases=("при задержке на 15 минут слот переносится", "ровно на 15 минут перенос"),
+        reviewed_answers=("При задержке до 15 минут включительно слот сохраняется.",),
     ),
     "REG-309": DocChunk(
         chunk_id="REG-309",
         text="Пункт 9.4. Выгрузка закрывающих актов формируется в личном кабинете 5-го рабочего дня месяца.",
+        reviewed_answers=("Выгрузка закрывающих актов формируется в личном кабинете 5-го рабочего дня месяца.",),
     ),
 }
 
@@ -91,7 +96,15 @@ def classify_rag_case(case: EvalCase, corpus: dict[str, DocChunk]) -> str:
             if f"{neg}{fact}" in ans_norm:
                 return "HALLUCINATION_OR_BOUNDARY_ERROR"
 
-    return "GROUNDED_OK"
+    # Успех требует совпадения всего ответа с проверенной формулировкой.
+    # Незнакомый пересказ остаётся на ручном разборе даже при совпадении срока и ссылки.
+    without_citations = CITE_RE.sub("", case.recorded_model_answer)
+    normalized = " ".join(without_citations.casefold().split()).replace(" .", ".")
+    if len(case.expected_chunk_ids) == 1:
+        approved = corpus[case.expected_chunk_ids[0]].reviewed_answers
+        if normalized in {text.casefold() for text in approved}:
+            return "GROUNDED_OK"
+    return "NEEDS_REVIEW"
 
 
 def evaluate_suite(cases: list[EvalCase]) -> dict[str, float | dict[str, int]]:
@@ -100,6 +113,7 @@ def evaluate_suite(cases: list[EvalCase]) -> dict[str, float | dict[str, int]]:
         "RETRIEVAL_MISS": 0,
         "HALLUCINATION_OR_BOUNDARY_ERROR": 0,
         "CORRECT_ABSTAIN": 0,
+        "NEEDS_REVIEW": 0,
     }
     answerable = [c for c in cases if c.expected_chunk_ids]
     recall_sum = 0.0
@@ -115,6 +129,23 @@ def evaluate_suite(cases: list[EvalCase]) -> dict[str, float | dict[str, int]]:
 
 
 class RagDiagnosticHarnessTests(unittest.TestCase):
+    def test_correct_deadline_does_not_validate_the_rest_of_the_answer(self):
+        responses = {
+            "Через 10 рабочих дней. Письменное заявление не требуется [REG-101].":
+                "HALLUCINATION_OR_BOUNDARY_ERROR",
+            "Возврат оформляется по письменному заявлению в течение 10 рабочих дней. Комиссия 30% [REG-101].":
+                "NEEDS_REVIEW",
+            "Срок возврата при наличии заявления: 10 рабочих дней [REG-101].":
+                "NEEDS_REVIEW",
+            "Возврат оформляется по письменному заявлению в течение 10 рабочих дней [REG-101].":
+                "GROUNDED_OK",
+        }
+        for answer, expected in responses.items():
+            with self.subTest(answer=answer):
+                case = EvalCase("refund", "Как вернуть предоплату?", ("REG-101",), ("REG-101",),
+                                answer, "10 рабочих дней")
+                self.assertEqual(classify_rag_case(case, CORPUS), expected)
+
     def test_separates_retrieval_miss_boundary_negation_and_tainted_abstain(self) -> None:
         suite = [
             EvalCase(
@@ -183,6 +214,7 @@ class RagDiagnosticHarnessTests(unittest.TestCase):
                 "RETRIEVAL_MISS": 1,
                 "HALLUCINATION_OR_BOUNDARY_ERROR": 3,
                 "CORRECT_ABSTAIN": 1,
+                "NEEDS_REVIEW": 0,
             },
         )
         self.assertEqual(report["recall_at_k"], 0.8)

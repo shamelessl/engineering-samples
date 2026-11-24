@@ -9,6 +9,7 @@ SAMPLES = (
     "data/02_test_scd2_sql.py",
     "forms/04_concurrent_version_conflict_test.py",
     "crm/batch_replay.py",
+    "crm/cursor_test.py",
     "rag/03_rag_retrieval_vs_citation_eval.py",
     "vision/demo.py",
     "booking/demo.py",

@@ -1,0 +1,17 @@
+{
+  "name": "order-conflict-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild form.tsx --bundle --outfile=build/app.js --minify",
+    "test": "npm run build && node browser.test.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.7",
+    "playwright": "1.65.1"
+  }
+}
