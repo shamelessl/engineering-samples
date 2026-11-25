@@ -8,6 +8,13 @@ import sys
 
 model = import_module("04_concurrent_version_conflict_test")
 root = Path(__file__).resolve().parent
+static_files = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("build/app.js", "text/javascript"),
+    "/form.css": ("form.css", "text/css; charset=utf-8"),
+    "/assets/inter-latin.woff2": ("assets/inter-latin.woff2", "font/woff2"),
+    "/assets/inter-cyrillic.woff2": ("assets/inter-cyrillic.woff2", "font/woff2"),
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -23,8 +30,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/order":
             self.reply(*model.get_order(self.server.db, 1))
-        elif self.path in ("/", "/app.js"):
-            file, mime = ("index.html", "text/html; charset=utf-8") if self.path == "/" else ("build/app.js", "text/javascript")
+        elif self.path in static_files:
+            file, mime = static_files[self.path]
             self.reply(200, (root / file).read_bytes(), mime)
         else:
             self.reply(404, {})
